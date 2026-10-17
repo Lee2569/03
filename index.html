@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ระบบยืมหนังสือ</title>
+<style>
+  :root { --bg:#f3f6f4; --ink:#1d2b26; --muted:#5f6f68; --line:#cfd9d4; --accent:#1f6f5c; --card:#fff; --err:#b3261e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:"Sarabun","Noto Sans Thai",system-ui,sans-serif; background:var(--bg); color:var(--ink); line-height:1.6; }
+  main { max-width:880px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { margin:0 0 4px; font-size:1.7rem; }
+  p.sub { margin:0 0 20px; color:var(--muted); }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:20px; }
+  h2 { margin:0 0 12px; font-size:1.1rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  label { display:block; font-size:.9rem; color:var(--muted); margin-bottom:4px; }
+  input[type=text] { width:100%; padding:10px; font:inherit; border:1px solid var(--line); border-radius:6px; }
+  input:focus, button:focus-visible { outline:3px solid #8fd0bd; outline-offset:1px; }
+  button { font:inherit; padding:10px 18px; border:0; border-radius:6px; background:var(--accent); color:#fff; cursor:pointer; }
+  button.alt { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  button.danger { background:#fff; color:var(--err); border:1px solid var(--err); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+  #msg { margin-top:10px; min-height:1.4em; font-size:.95rem; }
+  #msg.ok { color:var(--accent); } #msg.bad { color:var(--err); }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; min-width:560px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+  th { font-size:.9rem; color:var(--muted); font-weight:600; }
+  .empty { color:var(--muted); padding:12px 0; }
+  .clock { font-variant-numeric:tabular-nums; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>ระบบยืมหนังสือ</h1>
+  <p class="sub">เวลาปัจจุบัน: <span class="clock" id="clock"></span></p>
+
+  <section>
+    <h2>บันทึกการยืม</h2>
+    <div class="grid">
+      <div><label for="name">ชื่อนักเรียน</label><input type="text" id="name" autocomplete="off"></div>
+      <div><label for="sid">รหัสนักเรียน</label><input type="text" id="sid" inputmode="numeric" autocomplete="off"></div>
+      <div><label for="bid">รหัสหนังสือที่ยืม</label><input type="text" id="bid" autocomplete="off"></div>
+    </div>
+    <div class="row"><button id="borrow">ยืมหนังสือ</button></div>
+    <div id="msg" role="status"></div>
+  </section>
+
+  <section>
+    <h2>รายการยืมทั้งหมด (<span id="count">0</span>)</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>ชื่อ</th><th>รหัสนักเรียน</th><th>รหัสหนังสือ</th><th>วันที่</th><th>เวลา</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty">ยังไม่มีรายการยืม กรอกข้อมูลด้านบนแล้วกด “ยืมหนังสือ”</div>
+    <div class="row">
+      <button class="alt" id="export">บันทึกเป็นไฟล์ .csv</button>
+      <button class="alt" id="importBtn">นำเข้าไฟล์ .csv</button>
+      <input type="file" id="file" accept=".csv" hidden>
+      <button class="danger" id="clear">ล้างข้อมูลทั้งหมด</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const KEY = "book-lending-records";
+const HEADER = ["ชื่อนักเรียน","รหัสนักเรียน","รหัสหนังสือ","วันที่","เวลา"];
+let records = load();
+
+const $ = id => document.getElementById(id);
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch { return []; }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(records)); } catch {}
+}
+function pad(n) { return String(n).padStart(2, "0"); }
+function nowParts() {
+  const d = new Date();
+  return {
+    date: `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  };
+}
+function tick() { const n = nowParts(); $("clock").textContent = `${n.date} ${n.time}`; }
+setInterval(tick, 1000); tick();
+
+function say(text, ok) { const m = $("msg"); m.textContent = text; m.className = ok ? "ok" : "bad"; }
+
+function render() {
+  const tbody = $("rows");
+  tbody.innerHTML = "";
+  records.forEach(r => {
+    const tr = document.createElement("tr");
+    [r.name, r.sid, r.bid, r.date, r.time].forEach(v => {
+      const td = document.createElement("td");
+      td.textContent = v;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  $("count").textContent = records.length;
+  $("empty").style.display = records.length ? "none" : "block";
+}
+
+$("borrow").addEventListener("click", () => {
+  const name = $("name").value.trim();
+  const sid = $("sid").value.trim();
+  const bid = $("bid").value.trim();
+  if (!name || !sid || !bid) { say("กรอกข้อมูลให้ครบทั้ง 3 ช่อง", false); return; }
+  const t = nowParts();
+  records.push({ name, sid, bid, date: t.date, time: t.time });
+  save(); render();
+  say(`บันทึกแล้ว: ${name} ยืม ${bid} เมื่อ ${t.date} ${t.time}`, true);
+  $("bid").value = ""; $("bid").focus();
+});
+
+// ---------- CSV ----------
+function esc(v) { v = String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+
+function toCSV() {
+  const lines = [HEADER, ...records.map(r => [r.name, r.sid, r.bid, r.date, r.time])];
+  return lines.map(l => l.map(esc).join(",")).join("\r\n");
+}
+
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i+1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i+1] === "\n") i++;
+      row.push(cur); cur = "";
+      if (row.some(x => x !== "")) rows.push(row);
+      row = [];
+    } else cur += c;
+  }
+  row.push(cur);
+  if (row.some(x => x !== "")) rows.push(row);
+  return rows;
+}
+
+$("export").addEventListener("click", () => {
+  if (!records.length) { say("ยังไม่มีข้อมูลให้บันทึก", false); return; }
+  const blob = new Blob(["\uFEFF" + toCSV()], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "borrow-records.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  say("บันทึกไฟล์ borrow-records.csv แล้ว", true);
+});
+
+$("importBtn").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const rows = parseCSV(reader.result);
+    if (rows.length && rows[0][0] === HEADER[0]) rows.shift();
+    const added = rows.filter(r => r.length >= 5).map(r => ({ name:r[0], sid:r[1], bid:r[2], date:r[3], time:r[4] }));
+    records = records.concat(added);
+    save(); render();
+    say(`นำเข้า ${added.length} รายการแล้ว`, true);
+  };
+  reader.readAsText(f, "UTF-8");
+  e.target.value = "";
+});
+
+$("clear").addEventListener("click", () => {
+  if (records.length && confirm("ล้างข้อมูลทั้งหมด? (ควรบันทึกเป็น .csv ก่อน)")) {
+    records = []; save(); render(); say("ล้างข้อมูลแล้ว", true);
+  }
+});
+
+render();
+</script>
+</body>
+</html>
